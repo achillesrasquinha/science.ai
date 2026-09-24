@@ -62,20 +62,24 @@ jobs:
 
       - name: Ask Claude Code via OpenRouter
         continue-on-error: true
-        run: claude -p 'Reply with exactly one short sentence saying hello.' --output-format text
+        run: |
+          set -o pipefail
+          claude -p 'Reply with exactly one short sentence saying hello.' \
+            --output-format stream-json --include-partial-messages --verbose \
+            | jq -j --unbuffered -f .github/stream.jq
 
       - name: Run the hypothesis-engine skill for systems biology
         run: |
+          set -o pipefail
           ls -1 .claude/skills
           for attempt in 1 2 3; do
-            echo "::group::hypothesis-engine attempt $attempt"
+            echo "--- hypothesis-engine attempt $attempt ---"
             if claude -p '/hypothesis-engine systems biology' \
-                 --output-format text \
-                 --dangerously-skip-permissions; then
-              echo "::endgroup::"
+                 --output-format stream-json --include-partial-messages --verbose \
+                 --dangerously-skip-permissions \
+                 | jq -j --unbuffered -f .github/stream.jq; then
               exit 0
             fi
-            echo "::endgroup::"
             echo "::warning::attempt $attempt failed"
             sleep $((attempt * 20))
           done
