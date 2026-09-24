@@ -19,3 +19,17 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
 
       - run: claude --version
+
+      - name: Ask Claude Code via OpenRouter and echo the reply
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_MODEL: z-ai/glm-5.2:free
+        run: |
+          if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
+            echo "::error::OPENROUTER_API_KEY secret is not set"
+            exit 1
+          fi
+          reply=$(claude -p 'Reply with exactly one short sentence saying hello.' --output-format text)
+          echo "=== model reply ==="
+          echo "$reply"
