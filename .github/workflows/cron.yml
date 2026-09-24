@@ -25,7 +25,15 @@ jobs:
           ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_MODEL: z-ai/glm-5.2:free
+          DIAG_SAME_NAME_VARIABLE: ${{ vars.OPENROUTER_API_KEY }}
         run: |
+          echo "secret   OPENROUTER_API_KEY length: ${#ANTHROPIC_AUTH_TOKEN}"
+          echo "variable OPENROUTER_API_KEY length: ${#DIAG_SAME_NAME_VARIABLE}"
+          case "$ANTHROPIC_AUTH_TOKEN" in
+            sk-or-*) echo "prefix: looks like an OpenRouter key" ;;
+            "")      echo "prefix: empty" ;;
+            *)       echo "prefix: NOT sk-or- (wrong key type?)" ;;
+          esac
           if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
             echo "::error::OPENROUTER_API_KEY secret is not set"
             exit 1
