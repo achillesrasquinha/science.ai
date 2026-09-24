@@ -6,52 +6,62 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A 5-minute schedule can overlap a slow run; keep only the newest.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Defined once and reused by both the catalog override and the request.
+  OPENROUTER_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
+  OPENROUTER_MODEL_CONTEXT: '1000000'
+
 jobs:
   hello:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - run: echo "hello world"
+      - name: Echo hello world
+        run: echo "hello world"
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
-      - run: npm install -g @anthropic-ai/claude-code
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
 
-      - run: claude --version
+      - name: Report Claude Code version
+        run: claude --version
 
-      - name: Ask Claude Code via OpenRouter and echo the reply
+      - name: Map the OpenRouter model into Claude Code's catalog
+        run: |
+          mkdir -p ~/.claude
+          jq -n --arg model "$OPENROUTER_MODEL" '{
+            modelPicker: {
+              options: [
+                { model: $model, label: "OpenRouter free", behavesAs: "sonnet" }
+              ]
+            }
+          }' > ~/.claude/settings.json
+
+      - name: Ask Claude Code via OpenRouter
         env:
-          # Claude Code appends /v1/messages itself — do not include /v1 here.
+          # Claude Code appends /v1/messages itself, so this must not end in /v1.
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
-          # Must be explicitly empty, or Claude Code may fall back to Anthropic directly.
-          ANTHROPIC_API_KEY: ""
-          ANTHROPIC_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
-          # This model is not in Claude Code's catalog, so declare its real window.
-          CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000'
+          # Must be explicitly empty, or Claude Code authenticates against Anthropic.
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_MODEL: ${{ env.OPENROUTER_MODEL }}
+          # The model is not in Claude Code's catalog, so state its real window.
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ env.OPENROUTER_MODEL_CONTEXT }}
         run: |
           if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
             echo "::error::OPENROUTER_API_KEY secret is not set"
             exit 1
           fi
-
-          # Map the unknown provider id onto a known model shape.
-          mkdir -p ~/.claude
-          cat > ~/.claude/settings.json <<'JSON'
-          {
-            "modelPicker": {
-              "options": [
-                {
-                  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
-                  "label": "Nemotron 3 Ultra (free)",
-                  "behavesAs": "sonnet"
-                }
-              ]
-            }
-          }
-          JSON
-
-          reply=$(claude -p 'Reply with exactly one short sentence saying hello.' --output-format text)
-          echo "=== model reply ==="
-          echo "$reply"
+          claude -p 'Reply with exactly one short sentence saying hello.' --output-format text
