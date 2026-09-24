@@ -9,6 +9,9 @@ on:
 jobs:
   hello:
     runs-on: ubuntu-latest
+    # The OpenRouter key is stored as an environment secret, so the job
+    # must declare the environment to see it.
+    environment: OPENROUTER_API_KEY
     steps:
       - run: echo "hello world"
 
