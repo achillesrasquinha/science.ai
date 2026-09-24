@@ -11,3 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "hello world"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm install -g @anthropic-ai/claude-code
+
+      - run: claude --version
