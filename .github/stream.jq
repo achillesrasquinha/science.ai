@@ -7,7 +7,7 @@ if .type == "stream_event" then
     elif .type == "message_stop" then "\n"
     else "" end)
 elif .type == "system" and .subtype == "init" then
-  "[model: \(.model)]\n"
+  "[model: \(.model)] [mcp: \([.mcp_servers[]? | "\(.name)=\(.status)"] | join(", "))]\n"
 elif .type == "result" then
   "\n[result: \(.subtype), \(.duration_ms)ms, \(.num_turns) turns]\n"
 else "" end

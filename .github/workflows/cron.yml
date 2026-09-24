@@ -68,6 +68,14 @@ jobs:
             --output-format stream-json --include-partial-messages --verbose \
             | jq -j --unbuffered -f .github/stream.jq
 
+      - name: Install the life-science MCP server
+        run: |
+          git clone --depth 1 https://github.com/achillesrasquinha/biorouter.git "$RUNNER_TEMP/biorouter"
+          npm --prefix "$RUNNER_TEMP/biorouter" install --omit=dev --no-audit --no-fund
+          jq -n --arg entry "$RUNNER_TEMP/biorouter/src/index.js" \
+            '{mcpServers: {"life-science": {command: "node", args: [$entry]}}}' \
+            > "$RUNNER_TEMP/mcp.json"
+
       - name: Run the hypothesis-engine skill for systems biology
         run: |
           set -o pipefail
@@ -76,6 +84,7 @@ jobs:
             echo "--- hypothesis-engine attempt $attempt ---"
             if claude -p '/hypothesis-engine systems biology' \
                  --output-format stream-json --include-partial-messages --verbose \
+                 --mcp-config "$RUNNER_TEMP/mcp.json" --strict-mcp-config \
                  --dangerously-skip-permissions \
                  | jq -j --unbuffered -f .github/stream.jq; then
               exit 0
