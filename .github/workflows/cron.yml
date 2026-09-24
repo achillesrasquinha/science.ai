@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      topic:
+        description: Topic to generate hypotheses for
+        type: string
+        default: systems biology
 
 permissions:
   contents: read
@@ -13,8 +18,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: '22'
+  MCP_REPO: https://github.com/achillesrasquinha/biorouter.git
+  TOPIC: ${{ inputs.topic || 'systems biology' }}
+
 jobs:
-  hello:
+  hypothesis:
+    name: hypothesis-engine
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -25,8 +40,12 @@ jobs:
       ANTHROPIC_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000'
     steps:
-      - name: Echo hello world
-        run: echo "hello world"
+      - name: Verify the OpenRouter secret is present
+        run: |
+          if [[ -z "$ANTHROPIC_AUTH_TOKEN" ]]; then
+            echo "::error::OPENROUTER_API_KEY secret is not set"
+            exit 1
+          fi
 
       - name: Check out the repository
         uses: actions/checkout@v7
@@ -34,55 +53,33 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Report Claude Code version
-        run: claude --version
-
-      - name: Verify the OpenRouter secret is present
         run: |
-          if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
-            echo "::error::OPENROUTER_API_KEY secret is not set"
-            exit 1
-          fi
+          npm install -g @anthropic-ai/claude-code
+          claude --version
 
       - name: Map the OpenRouter model into Claude Code's catalog
         run: |
           mkdir -p ~/.claude
-          jq -n --arg model "$ANTHROPIC_MODEL" '{
-            modelPicker: {
-              options: [
-                { model: $model, label: "OpenRouter free", behavesAs: "sonnet" }
-              ]
-            }
-          }' > ~/.claude/settings.json
-
-      - name: Ask Claude Code via OpenRouter
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          claude -p 'Reply with exactly one short sentence saying hello.' \
-            --output-format stream-json --include-partial-messages --verbose \
-            | jq -j --unbuffered -f .github/stream.jq
+          jq -n --arg model "$ANTHROPIC_MODEL" \
+            '{modelPicker: {options: [{model: $model, label: "OpenRouter free", behavesAs: "sonnet"}]}}' \
+            > ~/.claude/settings.json
 
       - name: Install the life-science MCP server
         run: |
-          git clone --depth 1 https://github.com/achillesrasquinha/biorouter.git "$RUNNER_TEMP/biorouter"
+          git clone --depth 1 "$MCP_REPO" "$RUNNER_TEMP/biorouter"
           npm --prefix "$RUNNER_TEMP/biorouter" install --omit=dev --no-audit --no-fund
           jq -n --arg entry "$RUNNER_TEMP/biorouter/src/index.js" \
             '{mcpServers: {"life-science": {command: "node", args: [$entry]}}}' \
             > "$RUNNER_TEMP/mcp.json"
 
-      - name: Run the hypothesis-engine skill for systems biology
+      - name: Run the hypothesis-engine skill
         run: |
-          set -o pipefail
-          ls -1 .claude/skills
           for attempt in 1 2 3; do
-            echo "--- hypothesis-engine attempt $attempt ---"
-            if claude -p '/hypothesis-engine systems biology' \
+            echo "--- attempt $attempt: $TOPIC ---"
+            if claude -p "/hypothesis-engine $TOPIC" \
                  --output-format stream-json --include-partial-messages --verbose \
                  --mcp-config "$RUNNER_TEMP/mcp.json" --strict-mcp-config \
                  --dangerously-skip-permissions \
