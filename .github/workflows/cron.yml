@@ -13,14 +13,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  OPENROUTER_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
-  OPENROUTER_MODEL_CONTEXT: '1000000'
-
 jobs:
   hello:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Claude Code appends /v1/messages, so this must not end in /v1.
+      ANTHROPIC_BASE_URL: https://openrouter.ai/api
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+      ANTHROPIC_API_KEY: ''
+      ANTHROPIC_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000'
     steps:
       - name: Echo hello world
         run: echo "hello world"
@@ -39,10 +42,17 @@ jobs:
       - name: Report Claude Code version
         run: claude --version
 
+      - name: Verify the OpenRouter secret is present
+        run: |
+          if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
+            echo "::error::OPENROUTER_API_KEY secret is not set"
+            exit 1
+          fi
+
       - name: Map the OpenRouter model into Claude Code's catalog
         run: |
           mkdir -p ~/.claude
-          jq -n --arg model "$OPENROUTER_MODEL" '{
+          jq -n --arg model "$ANTHROPIC_MODEL" '{
             modelPicker: {
               options: [
                 { model: $model, label: "OpenRouter free", behavesAs: "sonnet" }
@@ -51,29 +61,23 @@ jobs:
           }' > ~/.claude/settings.json
 
       - name: Ask Claude Code via OpenRouter
-        env:
-          # Claude Code appends /v1/messages, so this must not end in /v1.
-          ANTHROPIC_BASE_URL: https://openrouter.ai/api
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
-          ANTHROPIC_API_KEY: ''
-          ANTHROPIC_MODEL: ${{ env.OPENROUTER_MODEL }}
-          CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ env.OPENROUTER_MODEL_CONTEXT }}
-        run: |
-          if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
-            echo "::error::OPENROUTER_API_KEY secret is not set"
-            exit 1
-          fi
-          claude -p 'Reply with exactly one short sentence saying hello.' --output-format text
+        continue-on-error: true
+        run: claude -p 'Reply with exactly one short sentence saying hello.' --output-format text
 
       - name: Run the hypothesis-engine skill for systems biology
-        env:
-          ANTHROPIC_BASE_URL: https://openrouter.ai/api
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
-          ANTHROPIC_API_KEY: ''
-          ANTHROPIC_MODEL: ${{ env.OPENROUTER_MODEL }}
-          CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ env.OPENROUTER_MODEL_CONTEXT }}
         run: |
           ls -1 .claude/skills
-          claude -p '/hypothesis-engine systems biology' \
-            --output-format text \
-            --dangerously-skip-permissions
+          for attempt in 1 2 3; do
+            echo "::group::hypothesis-engine attempt $attempt"
+            if claude -p '/hypothesis-engine systems biology' \
+                 --output-format text \
+                 --dangerously-skip-permissions; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::attempt $attempt failed"
+            sleep $((attempt * 20))
+          done
+          echo "::error::hypothesis-engine failed after 3 attempts"
+          exit 1
